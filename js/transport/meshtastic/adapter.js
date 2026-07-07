@@ -188,21 +188,47 @@ export class MeshtasticAdapter extends Transport {
   // Internal
   // ===================================================================
 
+  // Serial write queue — prevents overlapping QueueStatus handlers
+  _writeQueue = Promise.resolve();
+
+  _enqueueWrite(fn) {
+    const result = this._writeQueue.then(() => fn());
+    // Don't let a rejection break the queue chain
+    this._writeQueue = result.catch(() => {});
+    return result;
+  }
+
   async _sendPacket(packet, destNum, retries = 3) {
     if (!this._connected || !this._conn) {
       console.warn('[Meshtastic] Not connected, dropping packet');
       return;
     }
 
-    // Serialize game packet to JSON
+    // For HTTP: simple fire-and-forget, no queue needed
+    if (this._type !== 'serial') {
+      const jsonStr = typeof packet === 'string' ? packet : JSON.stringify(packet);
+      const bytes = encodeGamePacket(jsonStr, this._myNodeNum, this._channelIndex, destNum);
+      console.log('[Meshtastic] Sending packet: type=' + packet.t +
+                  ' gameId=' + packet.g + ' ch=' + this._channelIndex +
+                  ' dest=' + (destNum !== undefined ? '0x'+destNum.toString(16) : 'broadcast') +
+                  ' jsonLen=' + jsonStr.length + ' protoLen=' + bytes.length);
+      try {
+        const result = this._conn.write(bytes);
+        if (result && typeof result.then === 'function') await result;
+        console.log('[Meshtastic] Packet sent OK');
+      } catch (e) {
+        console.warn('[Meshtastic] Write error:', e.message);
+      }
+      return;
+    }
+
+    // Serial: queue writes to avoid overlapping QueueStatus handlers
+    return this._enqueueWrite(() => this._sendPacketSerial(packet, destNum, retries));
+  }
+
+  async _sendPacketSerial(packet, destNum, retries) {
     const jsonStr = typeof packet === 'string' ? packet : JSON.stringify(packet);
-
-    // Encode as protobuf
     const bytes = encodeGamePacket(jsonStr, this._myNodeNum, this._channelIndex, destNum);
-
-    // QueueStatus wait only makes sense for Serial (immediate response).
-    // HTTP polls every 3s — timing doesn't match, so skip the wait.
-    const waitForQueue = this._type === 'serial';
 
     for (let attempt = 0; attempt < retries; attempt++) {
       const label = attempt > 0 ? `(retry ${attempt}/${retries - 1})` : '';
@@ -211,50 +237,25 @@ export class MeshtasticAdapter extends Transport {
                   ' dest=' + (destNum !== undefined ? '0x'+destNum.toString(16) : 'broadcast') +
                   ' jsonLen=' + jsonStr.length + ' protoLen=' + bytes.length + ' ' + label);
 
-      // Send
       try {
-        const result = this._conn.write(bytes);
-        if (result && typeof result.then === 'function') {
-          await result;
-        }
+        await this._conn.write(bytes);
       } catch (e) {
         console.warn('[Meshtastic] Write error:', e.message);
-        if (attempt < retries - 1) {
-          await new Promise(r => setTimeout(r, 1500));
-          continue;
-        }
+        if (attempt < retries - 1) { await new Promise(r => setTimeout(r, 1500)); continue; }
         return;
       }
 
-      if (!waitForQueue) {
-        console.log('[Meshtastic] Packet sent OK (no QueueStatus check for ' + this._type + ')');
-        return;
-      }
-
-      // Wait for QueueStatus (Serial only — confirms packet was queued for TX)
-      let queueResolve;
-      const queuePromise = new Promise((resolve) => { queueResolve = resolve; });
-      const prevQueueHandler = this._queueStatusHandler;
-      this._queueStatusHandler = (status) => {
-        if (prevQueueHandler) prevQueueHandler(status);
-        queueResolve(status);
-      };
-
-      const timeout = 5000;
-      const status = await Promise.race([
-        queuePromise,
-        new Promise(r => setTimeout(() => r('timeout'), timeout)),
-      ]);
-
-      this._queueStatusHandler = prevQueueHandler;
+      // Wait for QueueStatus
+      const status = await new Promise((resolve) => {
+        this._queueStatusHandler = resolve;
+        setTimeout(() => resolve('timeout'), 5000);
+      });
+      this._queueStatusHandler = null;
 
       if (status === 'timeout') {
-        console.warn('[Meshtastic] No QueueStatus after', timeout, 'ms' +
+        console.warn('[Meshtastic] No QueueStatus after 5000ms' +
                      (attempt < retries - 1 ? ', retrying...' : ', giving up'));
-        if (attempt < retries - 1) {
-          await new Promise(r => setTimeout(r, 1500));
-          continue;
-        }
+        if (attempt < retries - 1) { await new Promise(r => setTimeout(r, 1500)); continue; }
         return;
       }
 
@@ -266,9 +267,7 @@ export class MeshtasticAdapter extends Transport {
 
       console.warn('[Meshtastic] TX queue full (free=' + status.free + ')' +
                    (attempt < retries - 1 ? ', retrying...' : ', giving up'));
-      if (attempt < retries - 1) {
-        await new Promise(r => setTimeout(r, 1500));
-      }
+      if (attempt < retries - 1) { await new Promise(r => setTimeout(r, 1500)); }
     }
   }
 

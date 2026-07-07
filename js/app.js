@@ -297,14 +297,16 @@ class MeshGame {
     this.lastPacketFromOpponent = performance.now() / 1000;
     this.gameSeed = Math.floor(Math.random() * 2147483647);
 
-    // Retry accept 3 times — ensure joiner receives it
+    // Retry accept 5 times with 3s gaps — Serial node TX is ~1/15 reliable.
+    // IMPORTANT: capture gameId BEFORE nulling this.openGameId!
+    const gameId = this.openGameId;
     const sendAccept = (n) => {
-      this.lobby.acceptJoin(this.openGameId, packet.s, this.gameSeed, 1, this.gameType);
-      if (n > 1) setTimeout(() => sendAccept(n - 1), 2000);
+      this.lobby.acceptJoin(gameId, packet.s, this.gameSeed, 1, this.gameType);
+      if (n > 1) setTimeout(() => sendAccept(n - 1), 3000);
     };
-    sendAccept(3);
+    sendAccept(5);
 
-    this.lobby.closeOffer(this.openGameId);
+    this.lobby.closeOffer(gameId);
     this.openGameId = null;
 
     this._transition(STATE.GAME_START, {
@@ -415,12 +417,12 @@ class MeshGame {
   }
 
   _joinGame(gameId, hostNodeId) {
-    // Retry join 3 times to overcome packet loss
+    // Retry join 5 times with 3s gaps — Serial TX is unreliable
     const send = (n) => {
       this.lobby.joinGame({ gameId, nodeId: hostNodeId });
-      if (n > 1) setTimeout(() => send(n - 1), 2000);
+      if (n > 1) setTimeout(() => send(n - 1), 3000);
     };
-    send(3);
+    send(5);
     this.opponentNode = hostNodeId;
     this.lastPacketFromOpponent = 0; // reset timer
     this._waitingAccept = true;       // track that we're waiting for accept
