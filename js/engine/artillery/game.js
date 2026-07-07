@@ -15,6 +15,7 @@ const GRAVITY = 9.8 * 0.6;
 const MAX_HP = 100;
 const MAX_DAMAGE = 50;
 const TANK_HEIGHT = 14;
+const MAX_WIND = 10;
 
 // ---------------------------------------------------------------------------
 // ArtilleryEngine
@@ -218,7 +219,7 @@ export class ArtilleryEngine extends BaseEngine {
     if (!gs || gs.outcome) return false;
     gs.round++;
     // Generate wind for new round
-    gs.wind = ((gs.seed * 31 + gs.round * 17) % 41) - 20;
+    gs.wind = ((gs.seed * 31 + gs.round * 17) % (MAX_WIND * 2 + 1)) - MAX_WIND;
     return true;
   }
 
@@ -385,6 +386,6 @@ export class ArtilleryEngine extends BaseEngine {
   generateWind() {
     const gs = this._state;
     if (!gs) return;
-    gs.wind = ((gs.seed * 31 + gs.round * 17) % 41) - 20;
+    gs.wind = ((gs.seed * 31 + gs.round * 17) % (MAX_WIND * 2 + 1)) - MAX_WIND;
   }
 }

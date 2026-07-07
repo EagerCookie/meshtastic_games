@@ -37,6 +37,7 @@ const GAME_STATES = [STATE.MY_TURN, STATE.ANIMATING, STATE.OPPONENT_TURN, STATE.
 const OFFER_HEARTBEAT_S = 8;
 const TURN_RESEND_S = 5;
 const MAX_RESENDS = 3;
+const CONNECTION_TIMEOUT_S = 120;
 
 // ============================================================
 // App
@@ -73,7 +74,6 @@ class MeshGame {
 
     // Connection
     this.lastPacketFromOpponent = 0;
-    this.connectionLost = false;
 
     // Loop
     this._lastTime = 0;
@@ -143,8 +143,7 @@ class MeshGame {
 
         // Reset tracking
         this.lastPacketFromOpponent = performance.now() / 1000;
-        this.connectionLost = false;
-
+    
         this._updateHUD();
 
         this._startGameTimer = setTimeout(() => {
@@ -273,7 +272,6 @@ class MeshGame {
 
     if (packet.s === this.opponentNode) {
       this.lastPacketFromOpponent = performance.now() / 1000;
-      if (this.connectionLost) { this.connectionLost = false; this._updateConnectionDot(); }
     }
 
     console.log('[Packet]', packet.t, packet);
@@ -593,7 +591,6 @@ class MeshGame {
     this.gameSeed = 0;
     this.seenPackets = new Set();
     this.lastPacketFromOpponent = 0;
-    this.connectionLost = false;
     this.localIsP1 = true;
     this._transition(STATE.LOBBY);
   }
@@ -730,42 +727,40 @@ class MeshGame {
     }
 
     const since = (performance.now() / 1000) - this.lastPacketFromOpponent;
+    const remaining = Math.max(0, CONNECTION_TIMEOUT_S - Math.round(since));
     if (this.lastPacketFromOpponent === 0) {
       dot.classList.add('conn-warn'); dot.title = 'Waiting for opponent...';
-    } else if (since < 30) {
+    } else if (remaining > 60) {
       dot.classList.add('conn-ok'); dot.title = 'Connected';
-      if (timer) timer.textContent = Math.round(since) + 's';
-    } else if (since < 90) {
+      if (timer) timer.textContent = remaining + 's';
+    } else if (remaining > 0) {
       dot.classList.add('conn-warn'); dot.title = 'Slow connection...';
-      if (timer) { timer.textContent = Math.round(since) + 's'; timer.classList.add('stale'); }
+      if (timer) { timer.textContent = remaining + 's'; timer.classList.add('stale'); }
     } else {
       dot.classList.add('conn-lost'); dot.title = 'Opponent disconnected!';
-      if (timer) { timer.textContent = Math.round(since) + 's'; timer.classList.add('lost'); }
+      if (timer) { timer.textContent = '0s'; timer.classList.add('lost'); }
     }
   }
 
   _checkConnection() {
     const inGame = GAME_STATES.includes(this.state);
 
-    // Also track connection while waiting for accept in lobby
+    // Track connection while waiting for accept in lobby
     if (!inGame && !this._waitingAccept) return;
     if (!this.opponentNode) return;
 
-    // Update the activity timer every frame (even in lobby waiting state)
+    // Update timer every frame
     this._updateConnectionDot();
 
-    if (!inGame) return; // rest is game-only
+    if (!inGame) return;
     if (this.lastPacketFromOpponent === 0) return;
+    if (!this.engine || this.engine.outcome) return;
 
     const since = (performance.now() / 1000) - this.lastPacketFromOpponent;
-    if (since > 90 && this.connectionLost && this.engine && !this.engine.outcome) {
-      console.log('[Conn] Opponent disconnected, ending game');
+    if (since > CONNECTION_TIMEOUT_S) {
+      console.log('[Conn] No packet for', Math.round(since), 's (timeout=' + CONNECTION_TIMEOUT_S + 's) — opponent disconnected');
       this.engine.forfeit(this.localIsP1 ? 'p2' : 'p1');
       this._transition(STATE.GAME_OVER, { won: true, draw: false, winner: this.nickname, forfeit: true });
-    }
-    if (since > 60 && !this.connectionLost) {
-      this.connectionLost = true;
-      this._updateConnectionDot();
     }
   }
 
@@ -783,10 +778,6 @@ class MeshGame {
     });
     document.getElementById('btn-serial').addEventListener('click', () => {
       this._connectMeshtastic('serial');
-    });
-    document.getElementById('btn-wifi').addEventListener('click', () => {
-      const url = prompt('Bridge HTTP URL:', 'http://localhost:8081');
-      if (url) this._connectMeshtastic('http', { httpUrl: url });
     });
     document.getElementById('btn-http').addEventListener('click', () => {
       const ip = prompt('Enter Meshtastic node IP:', '192.168.1.');

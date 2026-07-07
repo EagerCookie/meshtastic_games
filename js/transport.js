@@ -7,7 +7,7 @@
  *   MockTransport   — BroadcastChannel API for local dev (two browser tabs)
  *   BLETransport    — Web Bluetooth (Phase 4)
  *   SerialTransport — Web Serial (Phase 4)
- *   WiFiTransport   — HTTP to node IP (Phase 4)
+ *   HTTPTransport  — HTTP to node IP / bridge
  */
 
 import { decodePacket, ProtocolError } from './protocol.js';
