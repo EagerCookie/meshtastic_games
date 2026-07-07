@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mesh Artillery</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="game-container">
+    <!-- Game Canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Overlay screens -->
+    <div id="overlay" class="overlay">
+      <!-- Connection Screen -->
+      <div id="screen-connect" class="screen hidden">
+        <h1>🎯 Mesh Artillery</h1>
+        <p class="subtitle">LoRa-powered artillery duel</p>
+        <div class="menu-box">
+          <h2>Connect to Meshtastic Node</h2>
+          <div class="btn-group">
+            <button id="btn-ble" class="btn">📡 Bluetooth LE</button>
+            <button id="btn-serial" class="btn">🔌 USB Serial</button>
+            <button id="btn-wifi" class="btn">📶 WiFi Bridge (WS)</button>
+            <button id="btn-http" class="btn">🌐 HTTP</button>
+            <button id="btn-mock" class="btn">🧪 Mock Transport</button>
+          </div>
+          <div id="connect-status" class="status"></div>
+        </div>
+      </div>
+
+      <!-- Lobby Screen -->
+      <div id="screen-lobby" class="screen hidden">
+        <h1>🎯 Mesh Artillery</h1>
+        <div class="menu-box">
+          <div class="lobby-info">
+            <span id="lobby-nick"></span>
+            <span id="lobby-node"></span>
+          </div>
+          <div class="btn-group">
+            <button id="btn-open" class="btn">➕ Create Game</button>
+            <button id="btn-refresh" class="btn">🔄 Refresh Games</button>
+            <button id="btn-test-tx" class="btn">📡 Test TX (Games)</button>
+          </div>
+          <div id="games-list" class="games-list">
+            <p class="empty">No open games. Create one or refresh.</p>
+          </div>
+          <div id="lobby-status" class="status"></div>
+        </div>
+      </div>
+
+      <!-- Waiting Screen -->
+      <div id="screen-waiting" class="screen hidden">
+        <div class="menu-box">
+          <h2>⏳ Waiting for Opponent</h2>
+          <p id="waiting-game-id"></p>
+          <div class="spinner"></div>
+          <button id="btn-cancel-waiting" class="btn btn-danger">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Game Start Screen -->
+      <div id="screen-game-start" class="screen hidden">
+        <div class="menu-box">
+          <h2>⚔️ Game Starting!</h2>
+          <p id="start-vs"></p>
+          <p>Terrain seed: <span id="start-seed"></span></p>
+          <p id="start-turn-info"></p>
+        </div>
+      </div>
+
+      <!-- Game Over Screen -->
+      <div id="screen-game-over" class="screen hidden">
+        <div class="menu-box">
+          <h2 id="game-over-title"></h2>
+          <p id="game-over-stats"></p>
+          <div class="btn-group">
+            <button id="btn-back-lobby" class="btn">🏠 Back to Lobby</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- HUD (in-game) -->
+    <div id="hud" class="hidden">
+      <div id="hud-top">
+        <div class="player-info" id="hud-p1">
+          <span class="player-name" id="hud-p1-name">P1</span>
+          <div class="hp-bar-bg"><div class="hp-bar-fill hp-green" id="hud-p1-hp"></div></div>
+          <span class="hp-text" id="hud-p1-hp-text">100</span>
+        </div>
+        <div id="hud-center">
+          <div id="connection-dot" class="conn-ok" title="Connected"></div>
+          <div id="last-activity" title="Seconds since last game packet">0s</div>
+          <div id="wind-indicator">
+            <span id="wind-arrow">→</span>
+            <span id="wind-value">0</span>
+          </div>
+          <div id="round-indicator">Round <span id="round-num">1</span></div>
+        </div>
+        <div class="player-info" id="hud-p2">
+          <span class="player-name" id="hud-p2-name">P2</span>
+          <div class="hp-bar-bg"><div class="hp-bar-fill hp-green" id="hud-p2-hp"></div></div>
+          <span class="hp-text" id="hud-p2-hp-text">100</span>
+        </div>
+      </div>
+      <div id="hud-bottom">
+        <div id="controls">
+          <div class="control-group">
+            <label>Angle: <span id="angle-value">45</span>°</label>
+            <input type="range" id="angle-slider" min="0" max="180" value="45">
+          </div>
+          <div class="control-group">
+            <label>Power: <span id="power-value">50</span>%</label>
+            <input type="range" id="power-slider" min="0" max="100" value="50">
+          </div>
+          <button id="btn-fire" class="btn btn-fire">🔥 FIRE</button>
+          <button id="btn-forfeit" class="btn btn-danger">🏳️ Surrender</button>
+        </div>
+        <div id="turn-status"></div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
