@@ -23,6 +23,8 @@ import {
 // 1 = Games (secondary — requires same PSK on both nodes)
 const DEFAULT_CHANNEL = 1;
 
+const ts = () => new Date().toLocaleTimeString();
+
 export class MeshtasticAdapter extends Transport {
   /** @param {'ble'|'serial'|'http'} connectionType */
   constructor(connectionType, options = {}) {
@@ -208,15 +210,12 @@ export class MeshtasticAdapter extends Transport {
     if (this._type !== 'serial') {
       const jsonStr = typeof packet === 'string' ? packet : JSON.stringify(packet);
       const bytes = encodeGamePacket(jsonStr, this._myNodeNum, this._channelIndex, destNum);
-      console.log('[Meshtastic] Sending packet: type=' + packet.t +
-                  ' gameId=' + packet.g + ' ch=' + this._channelIndex +
-                  ' dest=' + (destNum !== undefined ? '0x'+destNum.toString(16) : 'broadcast') +
-                  ' jsonLen=' + jsonStr.length + ' protoLen=' + bytes.length);
+      const dest = (destNum !== undefined ? '→0x'+destNum.toString(16) : '→broadcast');
+      console.log(ts(), 'TX', packet.t, packet.g, 'ch=' + this._channelIndex, dest);
       try {
         const result = this._conn.write(bytes);
         if (result && typeof result.then === 'function') await result;
-        console.log('[Meshtastic] Packet sent OK');
-      } catch (e) {
+              } catch (e) {
         console.warn('[Meshtastic] Write error:', e.message);
       }
       return;
@@ -231,11 +230,8 @@ export class MeshtasticAdapter extends Transport {
     const bytes = encodeGamePacket(jsonStr, this._myNodeNum, this._channelIndex, destNum);
 
     for (let attempt = 0; attempt < retries; attempt++) {
-      const label = attempt > 0 ? `(retry ${attempt}/${retries - 1})` : '';
-      console.log('[Meshtastic] Sending packet: type=' + packet.t +
-                  ' gameId=' + packet.g + ' ch=' + this._channelIndex +
-                  ' dest=' + (destNum !== undefined ? '0x'+destNum.toString(16) : 'broadcast') +
-                  ' jsonLen=' + jsonStr.length + ' protoLen=' + bytes.length + ' ' + label);
+      const dest = (destNum !== undefined ? '→0x'+destNum.toString(16) : '→broadcast');
+      console.log(ts(), 'TX', packet.t, packet.g, 'ch=' + this._channelIndex, dest);
 
       try {
         await this._conn.write(bytes);
@@ -253,19 +249,19 @@ export class MeshtasticAdapter extends Transport {
       this._queueStatusHandler = null;
 
       if (status === 'timeout') {
-        console.warn('[Meshtastic] No QueueStatus after 5000ms' +
+        console.warn(ts(), '[Meshtastic] No QueueStatus after 5000ms' +
                      (attempt < retries - 1 ? ', retrying...' : ', giving up'));
         if (attempt < retries - 1) { await new Promise(r => setTimeout(r, 1500)); continue; }
         return;
       }
 
       if (status.free > 0) {
-        console.log('[Meshtastic] Packet queued OK (free=' + status.free +
+        console.log(ts(), '[Meshtastic] Packet queued OK (free=' + status.free +
                     ' maxlen=' + status.maxlen + ' pktId=0x' + status.meshPacketId.toString(16) + ')');
         return;
       }
 
-      console.warn('[Meshtastic] TX queue full (free=' + status.free + ')' +
+      console.warn(ts(), '[Meshtastic] TX queue full (free=' + status.free + ')' +
                    (attempt < retries - 1 ? ', retrying...' : ', giving up'));
       if (attempt < retries - 1) { await new Promise(r => setTimeout(r, 1500)); }
     }
@@ -322,18 +318,13 @@ export class MeshtasticAdapter extends Transport {
 
       // TEXT_MESSAGE_APP (portnum=1) — our game packets
       const text = decoded.payload ? new TextDecoder().decode(decoded.payload) : '';
-      console.log('[Meshtastic] ← text msg from=0x' + decoded.from.toString(16) +
-                  ' len=' + (text ? text.length : 0) +
-                  ' preview=' + (text ? text.substring(0, 80) : '(empty)'));
-
       if (!text) return;
 
       try {
         // Decode the compact JSON into a full packet object
         // (converts t:'o' → t:'offer', validates, etc.)
         const gamePacket = decodePacket(text);
-        console.log('[Meshtastic] ← game packet type=' + gamePacket.t +
-                    ' gameId=' + gamePacket.g + ' from=' + gamePacket.s);
+        console.log(ts(), 'RX', gamePacket.t, gamePacket.g, '←', gamePacket.s);
 
         // Track nodeId ↔ nodeNum mapping
         const senderNum = decoded.from;
@@ -352,8 +343,7 @@ export class MeshtasticAdapter extends Transport {
 
         this._receivePacket(gamePacket);
       } catch (e) {
-        console.log('[Meshtastic] ← not a game packet:', e.message,
-                    'text=' + text.substring(0, 60));
+        // silently ignore non-game text messages
       }
     } else {
       console.log('[Meshtastic] Unknown decoded type:', decoded.type);

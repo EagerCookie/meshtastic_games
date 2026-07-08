@@ -84,6 +84,8 @@ export async function createBleConnection() {
   return { connect, disconnect, write, onData, onDisconnect, get connected() { return connected; } };
 }
 
+const ts = () => new Date().toLocaleTimeString();
+
 // ============================================================================
 // Serial (Web Serial)
 // ============================================================================
@@ -168,7 +170,7 @@ export async function createSerialConnection() {
       const data = frameBuf.slice(4, 4 + length);
       frameBuf = frameBuf.slice(4 + length);
 
-      console.log('[Serial] ←', length, 'bytes');
+      console.log(ts(), '[Serial] ←', length, 'bytes');
       dataCallbacks.forEach(cb => {
         try { cb(data); } catch (e) { console.warn('[Serial] callback error:', e); }
       });
@@ -280,8 +282,10 @@ export async function createHttpConnection(baseUrl = '') {
       });
       if (resp.ok) {
         const buffer = await resp.arrayBuffer();
-        if (buffer && buffer.byteLength > 0) {
-          console.log('[HTTP] ←', buffer.byteLength, 'bytes');
+        if (buffer && buffer.byteLength > 100) {
+          console.log(ts(), '[HTTP] ←', buffer.byteLength, 'bytes');
+          _parseHttpResponse(new Uint8Array(buffer), dataCallbacks);
+        } else if (buffer && buffer.byteLength > 0) {
           _parseHttpResponse(new Uint8Array(buffer), dataCallbacks);
         }
       }

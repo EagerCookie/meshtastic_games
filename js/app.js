@@ -34,10 +34,11 @@ const GAME_STATES = [STATE.MY_TURN, STATE.ANIMATING, STATE.OPPONENT_TURN, STATE.
 // ============================================================
 // Timing
 // ============================================================
-const OFFER_HEARTBEAT_S = 8;
-const TURN_RESEND_S = 5;
-const MAX_RESENDS = 3;
-const CONNECTION_TIMEOUT_S = 120;
+const OFFER_HEARTBEAT_S = 23;
+const TURN_RESEND_S = 23;
+const MAX_RESENDS = 5;
+const CONNECTION_TIMEOUT_S = 240;
+const RETRY_GAP_MS = 23000;
 
 // ============================================================
 // App
@@ -154,6 +155,7 @@ class MeshGame {
       }
 
       case STATE.MY_TURN:
+        this._stopAcceptRetries(); // game started, no longer need accept
         this._enableControls(true);
         document.getElementById('turn-status').textContent = '🎯 Your turn!';
         this.engine.generateWind?.();
@@ -268,13 +270,18 @@ class MeshGame {
   _handlePacket(packet) {
     const dedupeKey = `${packet.t}|${packet.g}|${packet.s}|${packet.m}`;
     if (this.seenPackets.has(dedupeKey)) return;
-    this.seenPackets.add(dedupeKey);
+
+    // Don't dedupe turn/accept/ping before game starts — they'll
+    // be silently ignored (no engine) and need to be replayed later.
+    const isPreGame = !this.engine;
+    if (!isPreGame) {
+      this.seenPackets.add(dedupeKey);
+    }
 
     if (packet.s === this.opponentNode) {
       this.lastPacketFromOpponent = performance.now() / 1000;
     }
 
-    console.log('[Packet]', packet.t, packet);
 
     switch (packet.t) {
       case 'join':   this._onJoin(packet); break;
@@ -295,17 +302,21 @@ class MeshGame {
     this.lastPacketFromOpponent = performance.now() / 1000;
     this.gameSeed = Math.floor(Math.random() * 2147483647);
 
-    // Retry accept 5 times with 3s gaps — Serial node TX is ~1/15 reliable.
-    // IMPORTANT: capture gameId BEFORE nulling this.openGameId!
-    const gameId = this.openGameId;
-    const sendAccept = (n) => {
-      this.lobby.acceptJoin(gameId, packet.s, this.gameSeed, 1, this.gameType);
-      if (n > 1) setTimeout(() => sendAccept(n - 1), 3000);
-    };
-    sendAccept(5);
+    // Stop offer heartbeat — game is starting
+    this._stopOfferHeartbeat();
 
+    const gameId = this.openGameId;
     this.lobby.closeOffer(gameId);
     this.openGameId = null;
+
+    // Send accept repeatedly until joiner sends turn (implicit ACK).
+    this._stopAcceptRetries(); // prevent duplicate cycles
+    const sendAccept = () => {
+      if (this.state === STATE.GAME_OVER) return;
+      this.lobby.acceptJoin(gameId, packet.s, this.gameSeed, 1, this.gameType);
+      this._acceptTimer = setTimeout(sendAccept, RETRY_GAP_MS);
+    };
+    sendAccept();
 
     this._transition(STATE.GAME_START, {
       seed: this.gameSeed, myTurn: true, opponent: this.opponentNick,
@@ -313,8 +324,14 @@ class MeshGame {
   }
 
   _onAccept(packet) {
-    if (this.state !== STATE.LOBBY && this.state !== STATE.WAITING_OPPONENT) return;
-    this._waitingAccept = false; // got the accept, stop waiting
+    // Reject stale accepts: cancel arrived before we even sent join
+    if (this._cancelledGames?.has(packet.g) && !this._waitingAccept) return;
+    // Only process if we're waiting for join result or hosting
+    if (!this._waitingAccept && this.state !== STATE.WAITING_OPPONENT) return;
+    // If hosting, verify accept matches our open game
+    if (this.state === STATE.WAITING_OPPONENT && packet.g !== this.openGameId) return;
+    this._waitingAccept = false;
+    this._stopJoinRetries();
     this.opponentNode = packet.s;
     this.opponentNick = packet.n;
     this.localIsP1 = false;
@@ -331,11 +348,18 @@ class MeshGame {
 
   _onTurn(packet) {
     if (!this.engine || this.engine.outcome) return;
+    if (!GAME_STATES.includes(this.state)) return;
+    if (packet.g !== this._getGameId()) return;
+    // Ignore turns for past rounds (stale resends from mesh)
+    const turnRound = packet.d?.r || 0;
+    if (turnRound < this.engine.round) return;
     if (this.state !== STATE.OPPONENT_TURN) {
       console.log('[Turn] Not OPPONENT_TURN, ignoring');
       return;
     }
 
+    // Turn received — stop accept retries (implicit ACK)
+    this._stopAcceptRetries();
     this.lobby.sendPing(packet.g, packet.s, packet.m);
 
     const d = packet.d;
@@ -350,26 +374,37 @@ class MeshGame {
   }
 
   _onPing(packet) {
+    if (!GAME_STATES.includes(this.state)) return;
+    if (packet.g !== this._getGameId()) return;
     if (this.pendingTurnPacket && packet.d?.m === this.pendingTurnPacket.m) {
       console.log('[Ping] ACK, stopping resend');
       this._clearTurnResend();
     }
   }
 
-  _onForfeit(_packet) {
-    if (!this.engine) return;
+  _onForfeit(packet) {
+    if (!this.engine || !GAME_STATES.includes(this.state)) return;
+    if (packet.g !== this._getGameId()) return;
     this.engine.forfeit(this.localIsP1 ? 'p2' : 'p1');
     this._transition(STATE.GAME_OVER, { won: true, draw: false, winner: this.nickname, forfeit: true });
   }
 
-  _onCancel(_packet) {
+  _onCancel(packet) {
+    // Track cancellation only if we're NOT waiting for accept.
+    // (Cancel+accept together is normal join flow, not a real cancel.)
+    if (!this._waitingAccept) {
+      if (!this._cancelledGames) this._cancelledGames = new Set();
+      this._cancelledGames.add(packet.g);
+    }
+    if (!GAME_STATES.includes(this.state)) return;
     if (this.state === STATE.OPPONENT_TURN || this.state === STATE.WATCHING) {
       this._transition(STATE.GAME_OVER, { won: true, draw: false, winner: this.nickname, forfeit: true });
     }
   }
 
   _onResult(packet) {
-    if (!this.engine) return;
+    if (!this.engine || !GAME_STATES.includes(this.state)) return;
+    if (packet.g !== this._getGameId()) return;
     const w = packet.d.w;
     const won = (w === 'p1' && this.localIsP1) || (w === 'p2' && !this.localIsP1) || w === 'draw';
     this._transition(STATE.GAME_OVER, {
@@ -415,16 +450,18 @@ class MeshGame {
   }
 
   _joinGame(gameId, hostNodeId) {
-    // Retry join 5 times with 3s gaps — Serial TX is unreliable
-    const send = (n) => {
-      this.lobby.joinGame({ gameId, nodeId: hostNodeId });
-      if (n > 1) setTimeout(() => send(n - 1), 3000);
-    };
-    send(5);
+    this._stopJoinRetries(); // kill any previous join cycle
     this.opponentNode = hostNodeId;
-    this.lastPacketFromOpponent = 0; // reset timer
-    this._waitingAccept = true;       // track that we're waiting for accept
+    this.lastPacketFromOpponent = 0;
+    this._waitingAccept = true;
     document.getElementById('lobby-status').textContent = 'Join sent, waiting for host...';
+
+    const sendJoin = () => {
+      if (this.state !== STATE.LOBBY || !this._waitingAccept) return;
+      this.lobby.joinGame({ gameId, nodeId: hostNodeId });
+      this._joinTimer = setTimeout(sendJoin, RETRY_GAP_MS);
+    };
+    sendJoin();
   }
 
   _refreshGameList() {
@@ -447,6 +484,7 @@ class MeshGame {
   }
 
   _startOfferHeartbeat() {
+    this._stopOfferHeartbeat(); // prevent duplicate timers
     this._offerHeartbeatTimer = setInterval(() => {
       if (this.state === STATE.WAITING_OPPONENT && this.openGameId) {
         this.lobby.openGame(this.openGameId, this.gameType);
@@ -476,7 +514,7 @@ class MeshGame {
   _sendTurnPacket(data) {
     const packet = turnPacket(this._getGameId(), this.nodeId, this.nickname,
                                data.round, data.angle, data.powerPct, data.wind, '', '');
-    console.log('[Turn] Sending round:', data.round, 'angle:', data.angle, 'power:', data.powerPct);
+    console.log('[Turn] r' + data.round, 'a=' + data.angle, 'p=' + data.powerPct);
     this.pendingTurnPacket = packet;
     this.turnResendCount = 0;
     this._sendToOpponent();
@@ -508,7 +546,9 @@ class MeshGame {
   }
 
   _forfeit() {
-    if (!this.engine || this.engine.outcome) return;
+    if (!this.engine) { console.log('[Forfeit] No engine, ignoring'); return; }
+    if (this.engine.outcome) { console.log('[Forfeit] Game already over, ignoring'); return; }
+    console.log('[Forfeit] Sending forfeit...');
     // Send forfeit 3 times with 2s gap — overcome packet loss
     const send = (n) => {
       if (this.opponentNode && this.lobby) {
@@ -572,12 +612,26 @@ class MeshGame {
   // ==========================================================
   _cleanupGame() {
     this._clearTurnResend();
+    this._stopOfferHeartbeat();
+    this._stopJoinRetries();
+    this._stopAcceptRetries();
     this.openGameId = null;
     this.opponentNode = null;
     this.opponentNick = null;
-    if (this._offerHeartbeatTimer) { clearInterval(this._offerHeartbeatTimer); this._offerHeartbeatTimer = null; }
     if (this._postImpactTimer) { clearTimeout(this._postImpactTimer); this._postImpactTimer = null; }
     if (this._startGameTimer) { clearTimeout(this._startGameTimer); this._startGameTimer = null; }
+  }
+
+  _stopOfferHeartbeat() {
+    if (this._offerHeartbeatTimer) { clearInterval(this._offerHeartbeatTimer); this._offerHeartbeatTimer = null; }
+  }
+
+  _stopJoinRetries() {
+    if (this._joinTimer) { clearTimeout(this._joinTimer); this._joinTimer = null; }
+  }
+
+  _stopAcceptRetries() {
+    if (this._acceptTimer) { clearTimeout(this._acceptTimer); this._acceptTimer = null; }
   }
 
   _resetToLobby() {
@@ -600,7 +654,7 @@ class MeshGame {
       this.lobby?.cancel(this.openGameId);
       this.openGameId = null;
     }
-    if (this._offerHeartbeatTimer) { clearInterval(this._offerHeartbeatTimer); this._offerHeartbeatTimer = null; }
+    this._stopOfferHeartbeat();
   }
 
   // ==========================================================
@@ -626,13 +680,14 @@ class MeshGame {
 
       // Detect end of animation
       if (!this.engine?.isAnimating()) {
-        if (!this._postImpactTimer && !this.engine?.outcome) {
+        if (!this._postImpactTimer) {
           // Animation just finished — schedule turn end
+          // Delay depends: longer for game-over (show explosion), shorter for round end
+          const delay = this.engine.outcome ? 2500 : 1200;
           this._postImpactTimer = setTimeout(() => {
             this._postImpactTimer = null;
-            if (!this.engine || this.engine.outcome) return;
+            if (!this.engine) return;
 
-            // Check engine outcome (might have been set by impact)
             if (this.engine.outcome) {
               this._sendResult();
               const won = (this.engine.outcome === 'p1' && this.localIsP1) ||
@@ -657,7 +712,7 @@ class MeshGame {
             } else if (this.state === STATE.WATCHING) {
               this._transition(STATE.MY_TURN);
             }
-          }, 1200);
+          }, delay);
         }
       }
     }
