@@ -401,6 +401,14 @@ h2 {
   font-weight: 600;
 }
 
+#resend-status {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: #ff9800;
+  font-weight: 500;
+}
+#resend-status.warn { color: #f44336; }
+
 /* === Game Over === */
 #game-over-title {
   font-size: 2rem;

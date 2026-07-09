@@ -523,16 +523,17 @@ class MeshGame {
     if (!this.pendingTurnPacket || !this.opponentNode) return;
     this.transport.sendDirect(this.opponentNode, this.pendingTurnPacket);
     this.turnResendCount++;
+    this._updateResendStatus();
     if (this.turnResendTimer) clearTimeout(this.turnResendTimer);
     this.turnResendTimer = setTimeout(() => this._resendTick(), TURN_RESEND_S * 1000);
   }
 
   _resendTick() {
     if (!this.pendingTurnPacket || !this.opponentNode) return;
-    if (this.turnResendCount >= MAX_RESENDS) return;
-    console.log('[Turn] Resending...');
+    if (this.turnResendCount >= MAX_RESENDS) { this._updateResendStatus(); return; }
     this.transport.sendDirect(this.opponentNode, this.pendingTurnPacket);
     this.turnResendCount++;
+    this._updateResendStatus();
     if (this.turnResendCount < MAX_RESENDS) {
       this.turnResendTimer = setTimeout(() => this._resendTick(), TURN_RESEND_S * 1000);
     }
@@ -542,6 +543,19 @@ class MeshGame {
     if (this.turnResendTimer) { clearTimeout(this.turnResendTimer); this.turnResendTimer = null; }
     this.pendingTurnPacket = null;
     this.turnResendCount = 0;
+    this._updateResendStatus();
+  }
+
+  _updateResendStatus() {
+    const el = document.getElementById('resend-status');
+    if (!el) return;
+    if (!this.pendingTurnPacket || this.turnResendCount === 0) {
+      el.classList.add('hidden'); return;
+    }
+    el.classList.remove('hidden');
+    const remaining = MAX_RESENDS - this.turnResendCount;
+    el.textContent = `📡 resend ${this.turnResendCount}/${MAX_RESENDS}`;
+    el.classList.toggle('warn', remaining <= 1);
   }
 
   _forfeit() {
