@@ -51,7 +51,10 @@ class Bridge:
                 break
 
             buf += data
-            while len(buf) >= 4 and buf[:2] == FRAME_START:
+            while len(buf) >= 4:
+                if buf[:2] != FRAME_START:
+                    buf = buf[1:]
+                    continue
                 n = (buf[2] << 8) | buf[3]
                 if len(buf) < 4 + n:
                     break
