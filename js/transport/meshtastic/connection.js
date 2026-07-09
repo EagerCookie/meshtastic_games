@@ -170,7 +170,12 @@ export async function createSerialConnection() {
       const data = frameBuf.slice(4, 4 + length);
       frameBuf = frameBuf.slice(4 + length);
 
-      if (length > 100) console.log(ts(), '[Serial] ←', length, 'bytes');
+      if (window.MESH_DEBUG) {
+        console.log('[Serial RX]', length, 'bytes, Hex:', Array.from(data).map(b => b.toString(16).padStart(2, '0')).join(' '));
+      } else if (length > 100) {
+        console.log(ts(), '[Serial] ←', length, 'bytes');
+      }
+
       dataCallbacks.forEach(cb => {
         try { cb(data); } catch (e) { console.warn('[Serial] callback error:', e); }
       });
@@ -219,6 +224,11 @@ export async function createSerialConnection() {
     framed[0] = FRAME_START_1; framed[1] = FRAME_START_2;
     framed[2] = (len >>> 8) & 0xff; framed[3] = len & 0xff;
     framed.set(bytes, 4);
+
+    if (window.MESH_DEBUG) {
+      console.log('[Serial TX]', len, 'bytes, Hex:', Array.from(framed).map(b => b.toString(16).padStart(2, '0')).join(' '));
+    }
+
     await writer.write(framed);
   }
 

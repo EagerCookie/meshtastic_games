@@ -20,6 +20,7 @@ import sys
 import time
 
 FRAME_START = b"\x94\xc3"
+DEBUG = False
 
 
 class Bridge:
@@ -60,7 +61,10 @@ class Bridge:
                     break
                 msg = buf[4 : 4 + n]
                 buf = buf[4 + n :]
-                print(f"TCP recv: {len(msg)} bytes from node")
+                if DEBUG:
+                    print(f"TCP recv: {len(msg)} bytes from node, hex: {msg.hex()}")
+                else:
+                    print(f"TCP recv: {len(msg)} bytes from node")
                 self.messages.append((time.time(), msg))
 
         print("Node disconnected")
@@ -70,7 +74,10 @@ class Bridge:
         if not self.writer:
             raise RuntimeError("Not connected to node")
         header = FRAME_START + struct.pack(">H", len(data))
-        self.writer.write(header + data)
+        packet = header + data
+        if DEBUG:
+            print(f"TCP send: {len(data)} bytes to node, hex: {packet.hex()}")
+        self.writer.write(packet)
         await self.writer.drain()
 
     def get_messages(self):
@@ -147,7 +154,10 @@ async def handle_client(reader, writer, bridge):
             body += chunk
 
         if body:
-            print(f"PUT /toradio → {len(body)} bytes to node")
+            if DEBUG:
+                print(f"PUT /toradio → {len(body)} bytes to node, hex: {body.hex()}")
+            else:
+                print(f"PUT /toradio → {len(body)} bytes to node")
             try:
                 await bridge.send_to_node(body)
                 print(f"  → sent OK to {bridge.node_ip}:{bridge.node_port}")
@@ -489,7 +499,10 @@ if __name__ == "__main__":
     p.add_argument("--test", action="store_true", help="Send test messages")
     p.add_argument("--listen", action="store_true", help="Listen for incoming packets as JSON")
     p.add_argument("--interactive", action="store_true", help="Interactive send/listen mode")
+    p.add_argument("--debug", action="store_true", help="Show raw hex bytes of packets")
     args = p.parse_args()
+    if args.debug:
+        DEBUG = True
     try:
         asyncio.run(main(args))
     except KeyboardInterrupt:
