@@ -369,6 +369,12 @@ class MeshGame {
       this.lobby.sendPing(packet.g, packet.s, packet.m);
     }
 
+    // If the opponent is sending a turn for the current round, they must have
+    // received our turn for the current round. We can stop resending.
+    if (turnRound === this.engine.round) {
+      this._clearTurnResend();
+    }
+
     // Ignore turn packets that do not match the expected current round
     if (turnRound !== this.engine.round) {
       console.log(`[Turn] Expected round ${this.engine.round}, got ${turnRound}. Ignoring.`);
