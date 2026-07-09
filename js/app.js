@@ -83,6 +83,7 @@ class MeshGame {
     this._postImpactTimer = null;
     this._startGameTimer = null;
     this._offerHeartbeatTimer = null;
+    this._lobbyTimer = null;
     this.lastActivityTime = 0;
     this._activityLost = false;
     this._waitingAccept = false;
@@ -102,6 +103,8 @@ class MeshGame {
     const prev = this.state;
     console.log(`🔄 ${prev} → ${newState}`);
     this.state = newState;
+
+    this._stopLobbyTimer();
 
     document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
 
@@ -123,6 +126,7 @@ class MeshGame {
         document.getElementById('lobby-node').textContent = this.nodeId || '';
         document.getElementById('lobby-status').textContent = '';
         this._refreshGameList();
+        this._startLobbyTimer();
         break;
 
       case STATE.WAITING_OPPONENT:
@@ -280,6 +284,11 @@ class MeshGame {
 
     if (packet.s === this.opponentNode) {
       this.lastPacketFromOpponent = performance.now() / 1000;
+    }
+
+    // Auto-refresh the visible games list if we receive lobby updates
+    if (this.state === STATE.LOBBY && (packet.t === 'offer' || packet.t === 'cancel')) {
+      setTimeout(() => this._refreshGameList(), 10);
     }
 
 
@@ -660,6 +669,7 @@ class MeshGame {
     this._stopOfferHeartbeat();
     this._stopJoinRetries();
     this._stopAcceptRetries();
+    this._stopLobbyTimer();
     this.openGameId = null;
     this.activeLobbyGameId = null;
     this.opponentNode = null;
@@ -670,6 +680,20 @@ class MeshGame {
 
   _stopOfferHeartbeat() {
     if (this._offerHeartbeatTimer) { clearInterval(this._offerHeartbeatTimer); this._offerHeartbeatTimer = null; }
+  }
+
+  _startLobbyTimer() {
+    this._stopLobbyTimer();
+    this._lobbyTimer = setInterval(() => {
+      this._refreshGameList();
+    }, 5000);
+  }
+
+  _stopLobbyTimer() {
+    if (this._lobbyTimer) {
+      clearInterval(this._lobbyTimer);
+      this._lobbyTimer = null;
+    }
   }
 
   _stopJoinRetries() {
@@ -887,7 +911,6 @@ class MeshGame {
 
     // Lobby
     document.getElementById('btn-open').addEventListener('click', () => this._openGame());
-    document.getElementById('btn-refresh').addEventListener('click', () => this._refreshGameList());
     document.getElementById('btn-test-tx').addEventListener('click', () => this._testTx());
     document.getElementById('btn-cancel-waiting').addEventListener('click', () => {
       this._cancelOpenGame();
