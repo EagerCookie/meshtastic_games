@@ -155,7 +155,6 @@ class MeshGame {
       }
 
       case STATE.MY_TURN:
-        this._stopAcceptRetries(); // game started, no longer need accept
         this._enableControls(true);
         document.getElementById('turn-status').textContent = '🎯 Your turn!';
         this.engine.generateWind?.();
