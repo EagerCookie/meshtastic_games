@@ -60,6 +60,7 @@ class MeshGame {
 
     // Match
     this.openGameId = null;
+    this.activeLobbyGameId = null;
     this.opponentNode = null;
     this.opponentNick = null;
     this.localIsP1 = true;
@@ -294,12 +295,22 @@ class MeshGame {
   }
 
   _onJoin(packet) {
+    // If Host has already transitioned to game/start, but the client retries join
+    // because the first accept packet was lost, re-send the accept packet.
+    const inGame = GAME_STATES.includes(this.state) || this.state === STATE.GAME_START;
+    if (inGame && packet.g === this.activeLobbyGameId && packet.s === this.opponentNode) {
+      console.log('[Lobby] Duplicate join received, re-sending accept...');
+      this.lobby.acceptJoin(this.activeLobbyGameId, packet.s, this.gameSeed, 1, this.gameType);
+      return;
+    }
+
     if (this.state !== STATE.WAITING_OPPONENT || packet.g !== this.openGameId) return;
     this.opponentNode = packet.s;
     this.opponentNick = packet.n;
     this.localIsP1 = true;
     this.lastPacketFromOpponent = performance.now() / 1000;
     this.gameSeed = Math.floor(Math.random() * 2147483647);
+    this.activeLobbyGameId = this.openGameId;
 
     // Stop offer heartbeat — game is starting
     this._stopOfferHeartbeat();
@@ -349,9 +360,21 @@ class MeshGame {
     if (!this.engine || this.engine.outcome) return;
     if (!GAME_STATES.includes(this.state)) return;
     if (packet.g !== this._getGameId()) return;
-    // Ignore turns for past rounds (stale resends from mesh)
+
     const turnRound = packet.d?.r || 0;
-    if (turnRound < this.engine.round) return;
+
+    // Always ACK turn packets matching the current or previous round
+    // to prevent the opponent from getting stuck in a resend loop.
+    if (turnRound === this.engine.round || turnRound === this.engine.round - 1) {
+      this.lobby.sendPing(packet.g, packet.s, packet.m);
+    }
+
+    // Ignore turn packets that do not match the expected current round
+    if (turnRound !== this.engine.round) {
+      console.log(`[Turn] Expected round ${this.engine.round}, got ${turnRound}. Ignoring.`);
+      return;
+    }
+
     if (this.state !== STATE.OPPONENT_TURN) {
       console.log('[Turn] Not OPPONENT_TURN, ignoring');
       return;
@@ -359,7 +382,6 @@ class MeshGame {
 
     // Turn received — stop accept retries (implicit ACK)
     this._stopAcceptRetries();
-    this.lobby.sendPing(packet.g, packet.s, packet.m);
 
     const d = packet.d;
 
@@ -375,6 +397,10 @@ class MeshGame {
   _onPing(packet) {
     if (!GAME_STATES.includes(this.state)) return;
     if (packet.g !== this._getGameId()) return;
+
+    // Any ping from the client indicates they are fully connected
+    this._stopAcceptRetries();
+
     if (this.pendingTurnPacket && packet.d?.m === this.pendingTurnPacket.m) {
       console.log('[Ping] ACK, stopping resend');
       this._clearTurnResend();
@@ -629,6 +655,7 @@ class MeshGame {
     this._stopJoinRetries();
     this._stopAcceptRetries();
     this.openGameId = null;
+    this.activeLobbyGameId = null;
     this.opponentNode = null;
     this.opponentNick = null;
     if (this._postImpactTimer) { clearTimeout(this._postImpactTimer); this._postImpactTimer = null; }
