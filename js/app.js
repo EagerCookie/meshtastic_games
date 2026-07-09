@@ -277,7 +277,8 @@ class MeshGame {
 
     // Don't dedupe turn/accept/ping before game starts — they'll
     // be silently ignored (no engine) and need to be replayed later.
-    const isPreGame = !this.engine;
+    // Also include GAME_START state as pre-game since turns are ignored there.
+    const isPreGame = !this.engine || this.state === STATE.GAME_START;
     if (!isPreGame) {
       this.seenPackets.add(dedupeKey);
     }
