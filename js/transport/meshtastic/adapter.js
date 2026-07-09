@@ -211,7 +211,8 @@ export class MeshtasticAdapter extends Transport {
       const jsonStr = typeof packet === 'string' ? packet : JSON.stringify(packet);
       const bytes = encodeGamePacket(jsonStr, this._myNodeNum, this._channelIndex, destNum);
       const dest = (destNum !== undefined ? '→0x'+destNum.toString(16) : '→broadcast');
-      console.log(ts(), 'TX', packet.t, packet.g, 'ch=' + this._channelIndex, dest);
+      const typeLabel = {o:'offer',j:'join',a:'accept',t:'turn',p:'ping',f:'forfeit',k:'cancel',r:'result'}[packet.t] || packet.t;
+      console.log(ts(), '📤', typeLabel, packet.g, dest);
       try {
         const result = this._conn.write(bytes);
         if (result && typeof result.then === 'function') await result;
@@ -231,7 +232,8 @@ export class MeshtasticAdapter extends Transport {
 
     for (let attempt = 0; attempt < retries; attempt++) {
       const dest = (destNum !== undefined ? '→0x'+destNum.toString(16) : '→broadcast');
-      console.log(ts(), 'TX', packet.t, packet.g, 'ch=' + this._channelIndex, dest);
+      const typeLabel = {o:'offer',j:'join',a:'accept',t:'turn',p:'ping',f:'forfeit',k:'cancel',r:'result'}[packet.t] || packet.t;
+      console.log(ts(), '📤', typeLabel, packet.g, dest);
 
       try {
         await this._conn.write(bytes);
@@ -324,7 +326,7 @@ export class MeshtasticAdapter extends Transport {
         // Decode the compact JSON into a full packet object
         // (converts t:'o' → t:'offer', validates, etc.)
         const gamePacket = decodePacket(text);
-        console.log(ts(), 'RX', gamePacket.t, gamePacket.g, '←', gamePacket.s);
+        console.log(ts(), '📥', gamePacket.t, gamePacket.g, '←', gamePacket.s);
 
         // Track nodeId ↔ nodeNum mapping
         const senderNum = decoded.from;

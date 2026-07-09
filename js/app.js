@@ -99,7 +99,7 @@ class MeshGame {
   // ==========================================================
   _transition(newState, data = {}) {
     const prev = this.state;
-    console.log(`[State] ${prev} → ${newState}`, data);
+    console.log(`🔄 ${prev} → ${newState}`);
     this.state = newState;
 
     document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));

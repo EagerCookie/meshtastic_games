@@ -170,7 +170,7 @@ export async function createSerialConnection() {
       const data = frameBuf.slice(4, 4 + length);
       frameBuf = frameBuf.slice(4 + length);
 
-      console.log(ts(), '[Serial] ←', length, 'bytes');
+      if (length > 100) console.log(ts(), '[Serial] ←', length, 'bytes');
       dataCallbacks.forEach(cb => {
         try { cb(data); } catch (e) { console.warn('[Serial] callback error:', e); }
       });
